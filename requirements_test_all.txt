@@ -888,6 +888,9 @@ pymyq==3.0.4
 # homeassistant.components.mysensors
 pymysensors==0.21.0
 
+# homeassistant.components.nobo_hub
+pynobo==1.2.0
+
 # homeassistant.components.nuki
 pynuki==1.4.1
 

@@ -169,6 +169,7 @@ FLOWS = [
     "netatmo",
     "nexia",
     "nightscout",
+    "nobo_hub",
     "notion",
     "nuheat",
     "nuki",
