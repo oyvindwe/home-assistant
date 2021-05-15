@@ -17,19 +17,40 @@ from homeassistant.components.climate.const import (
     ClimateEntityFeature,
     HVACMode,
 )
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_MODE, ATTR_NAME, PRECISION_TENTHS, TEMP_CELSIUS
+from homeassistant.const import (
+    ATTR_MANUFACTURER,
+    ATTR_MODE,
+    ATTR_MODEL,
+    ATTR_NAME,
+    PRECISION_TENTHS,
+    TEMP_CELSIUS,
+)
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import DeviceInfo, Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import StateType
 
 from .const import (
+    ATTR_HARDWARE_VERSION,
     ATTR_OVERRIDE_ALLOWED,
+    ATTR_SERIAL,
+    ATTR_SOFTWARE_VERSION,
+    ATTR_SUGGESTED_AREA,
     ATTR_TARGET_ID,
     ATTR_TARGET_TYPE,
     ATTR_TEMP_COMFORT_C,
     ATTR_TEMP_ECO_C,
+    ATTR_VIA_DEVICE,
+    ATTR_ZONE_ID,
     CONF_OVERRIDE_TYPE,
     DOMAIN,
+    NOBO_MANUFACTURER,
     OVERRIDE_TYPE_NOW,
 )
 
@@ -62,10 +83,42 @@ async def async_setup_entry(
     )
 
     # Add zones as entities
-    async_add_entities(
-        [NoboZone(zone_id, hub, override_type) for zone_id in hub.zones],
-        True,
+    entities: list[Entity] = [
+        NoboZone(zone_id, hub, override_type) for zone_id in hub.zones
+    ]
+
+    dev_reg = await hass.helpers.device_registry.async_get_registry()
+    # Register hub
+    dev_reg.async_get_or_create(
+        config_entry_id=config_entry.entry_id,
+        identifiers={(DOMAIN, hub.hub_info[ATTR_SERIAL])},
+        manufacturer=NOBO_MANUFACTURER,
+        name=hub.hub_info[ATTR_NAME],
+        model=f"Nobø Ecohub ({hub.hub_info[ATTR_HARDWARE_VERSION]})",
+        sw_version=hub.hub_info[ATTR_SOFTWARE_VERSION],
     )
+    for (component_id, component) in hub.components.items():
+        model: nobo.Model = component[ATTR_MODEL]
+        if model.has_temp_sensor:
+            # Register temperature sensor
+            entities.append(NoboTemperatureSensor(component_id, hub))
+        else:
+            # Register other component as device without entity.
+            zone_id = component[ATTR_ZONE_ID]
+            zone_name = None
+            if zone_id != -1:
+                zone_name = hub.zones[zone_id][ATTR_NAME]
+            dev_reg.async_get_or_create(
+                config_entry_id=config_entry.entry_id,
+                identifiers={(DOMAIN, component[ATTR_SERIAL])},
+                manufacturer=NOBO_MANUFACTURER,
+                name=component[ATTR_NAME],
+                model=component[ATTR_MODEL].name,
+                via_device=(DOMAIN, hub.hub_info[ATTR_SERIAL]),
+                suggested_area=zone_name,
+            )
+
+    async_add_entities(entities, True)
 
 
 class NoboZone(ClimateEntity):
@@ -198,3 +251,48 @@ class NoboZone(ClimateEntity):
     def _after_update(self, hub):
         self._read_state()
         self.async_write_ha_state()
+
+
+class NoboTemperatureSensor(SensorEntity):
+    """A Nobø device with a temperature sensor."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = TEMP_CELSIUS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, component_id: str, hub: nobo) -> None:
+        """Initialize the temperature sensor."""
+        self._temperature: StateType = None
+        self._id = component_id
+        self._nobo = hub
+        component = hub.components[self._id]
+        self._attr_unique_id = component[ATTR_SERIAL]
+        self._attr_name = component[ATTR_NAME]
+        self._attr_has_entity_name = True
+        self._attr_device_info: DeviceInfo = {
+            ATTR_NAME: component[ATTR_NAME],
+            ATTR_MANUFACTURER: NOBO_MANUFACTURER,
+            ATTR_MODEL: component[ATTR_MODEL].name,
+            ATTR_VIA_DEVICE: (DOMAIN, hub.hub_info[ATTR_SERIAL]),
+        }
+        zone_id = component[ATTR_ZONE_ID]
+        if zone_id != -1:
+            self._attr_device_info[ATTR_SUGGESTED_AREA] = hub.zones[zone_id][ATTR_NAME]
+
+    async def async_added_to_hass(self) -> None:
+        """Register callback from hub."""
+        self._nobo.register_callback(self._after_update)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Deregister callback from hub."""
+        self._nobo.deregister_callback(self._after_update)
+
+    @callback
+    def _after_update(self, hub) -> None:
+        self._temperature = hub.get_current_component_temperature(self._id)
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the current temperature."""
+        return self._temperature
