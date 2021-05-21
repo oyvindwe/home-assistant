@@ -19,10 +19,12 @@ from homeassistant.components.climate.const import (
     PRESET_ECO,
     PRESET_NONE,
     SUPPORT_PRESET_MODE,
+    SUPPORT_TARGET_TEMPERATURE,
     SUPPORT_TARGET_TEMPERATURE_RANGE,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    ATTR_TEMPERATURE,
     CONF_COMMAND_OFF,
     CONF_COMMAND_ON,
     CONF_HOST,
@@ -35,9 +37,7 @@ from homeassistant.core import HomeAssistant, callback
 import homeassistant.helpers.config_validation as cv
 import homeassistant.util.dt as dt_util
 
-from .const import DOMAIN, HUB
-
-SUPPORT_FLAGS = SUPPORT_PRESET_MODE | SUPPORT_TARGET_TEMPERATURE_RANGE
+from .const import COMPONENT_TYPES, DOMAIN, HUB
 
 PRESET_MODES = [PRESET_NONE, PRESET_COMFORT, PRESET_ECO, PRESET_AWAY]
 
@@ -188,6 +188,39 @@ class NoboZone(ClimateEntity):
         self._command_off_id = command_off_id
         self._command_on_id = command_on_id
 
+        # Set support flags
+        # All component_types supports SUPPORT_PRESET_MODE
+        # Some component_types only supports setting the eco (lower) temperature: SUPPORT_TARGET_TEMPERATURE
+        # Some component_types supports both temperatures: SUPPORT_TARGET_TEMPERATURE_RANGE = 2
+        # If a zone consists of a mix of component types, enable for the union.
+        component_types = set(
+            map(
+                lambda component: component["serial"][0:3],
+                filter(
+                    lambda component: component["zone_id"] == self._id,
+                    self._nobo.components.values(),
+                ),
+            )
+        )
+        support_eco = False
+        support_comfort = False
+        for component_type in component_types:
+            if component_type in COMPONENT_TYPES:
+                support_eco = support_eco | COMPONENT_TYPES[component_type].set_eco
+                support_comfort = (
+                    support_comfort | COMPONENT_TYPES[component_type].set_comfort
+                )
+            else:
+                # Do not disable control for unknown component types
+                support_comfort = True
+                support_eco = True
+        if support_comfort and support_eco:
+            self._support_flags = SUPPORT_PRESET_MODE | SUPPORT_TARGET_TEMPERATURE_RANGE
+        elif support_comfort or support_eco:
+            self._support_flags = SUPPORT_PRESET_MODE | SUPPORT_TARGET_TEMPERATURE
+        else:
+            self._support_flags = SUPPORT_PRESET_MODE
+
         # Register for callbacks before initial update to avoid race condition.
         self._nobo.register_callback(self._after_update)
         self.update()
@@ -200,7 +233,7 @@ class NoboZone(ClimateEntity):
     @property
     def supported_features(self):
         """Return the list of supported features."""
-        return SUPPORT_FLAGS
+        return self._support_flags
 
     @property
     def should_poll(self):
@@ -235,12 +268,20 @@ class NoboZone(ClimateEntity):
     @property
     def target_temperature_high(self):
         """Return the highbound target temperature we try to reach."""
-        return self._target_temperature_high
+        if self._support_flags & SUPPORT_TARGET_TEMPERATURE_RANGE:
+            return self._target_temperature_high
 
     @property
     def target_temperature_low(self):
         """Return the lowbound target temperature we try to reach."""
-        return self._target_temperature_low
+        if self._support_flags & SUPPORT_TARGET_TEMPERATURE_RANGE:
+            return self._target_temperature_low
+
+    @property
+    def target_temperature(self):
+        """Return the target temperature we try to reach."""
+        if self._support_flags & SUPPORT_TARGET_TEMPERATURE:
+            return self._target_temperature
 
     @property
     def hvac_modes(self):
@@ -270,7 +311,6 @@ class NoboZone(ClimateEntity):
         """Return the current temperature."""
         if self._current_temperature is not None:
             return float(self._current_temperature)
-        return None
 
     async def async_set_hvac_mode(self, hvac_mode):
         """Set HVAC mode to comfort(HEAT) or back to normal(AUTO)."""
@@ -338,15 +378,20 @@ class NoboZone(ClimateEntity):
 
     async def async_set_temperature(self, **kwargs):
         """Set new target temperature."""
-        low = int(kwargs.get(ATTR_TARGET_TEMP_LOW))
-        high = int(kwargs.get(ATTR_TARGET_TEMP_HIGH))
-        if low > int(self._nobo.zones[self._id]["temp_comfort_c"]):
-            low = int(self._nobo.zones[self._id]["temp_comfort_c"])
-        if high < int(self._nobo.zones[self._id]["temp_eco_c"]):
-            high = int(self._nobo.zones[self._id]["temp_eco_c"])
-        await self._nobo.async_update_zone(
-            self._id, temp_comfort_c=high, temp_eco_c=low
-        )
+        target = int(kwargs.get(ATTR_TEMPERATURE))
+        if target is not None:
+            # All known types that only sets one temperature, sets the eco temperature
+            await self._nobo.async_update_zone(self._id, temp_eco_c=target)
+        else:
+            low = int(kwargs.get(ATTR_TARGET_TEMP_LOW))
+            high = int(kwargs.get(ATTR_TARGET_TEMP_HIGH))
+            if low > int(self._nobo.zones[self._id]["temp_comfort_c"]):
+                low = int(self._nobo.zones[self._id]["temp_comfort_c"])
+            if high < int(self._nobo.zones[self._id]["temp_eco_c"]):
+                high = int(self._nobo.zones[self._id]["temp_eco_c"])
+            await self._nobo.async_update_zone(
+                self._id, temp_comfort_c=high, temp_eco_c=low
+            )
 
     @callback
     def update(self):
@@ -382,6 +427,8 @@ class NoboZone(ClimateEntity):
             self._nobo.zones[self._id]["temp_comfort_c"]
         )
         self._target_temperature_low = int(self._nobo.zones[self._id]["temp_eco_c"])
+        # All known types that only sets one temperature, sets the eco temperature
+        self._target_temperature = self._target_temperature_low
 
     @callback
     def _after_update(self, hub):
