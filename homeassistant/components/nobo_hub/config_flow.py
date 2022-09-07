@@ -1,6 +1,7 @@
 """Config flow for Nobø Ecohub integration."""
 from __future__ import annotations
 
+import logging
 import socket
 from typing import Any
 
@@ -8,6 +9,7 @@ from pynobo import nobo
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.components.dhcp import DhcpServiceInfo
 from homeassistant.const import CONF_IP_ADDRESS
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
@@ -25,6 +27,8 @@ from .const import (
 DATA_NOBO_HUB_IMPL = "nobo_hub_flow_implementation"
 DEVICE_INPUT = "device_input"
 
+_LOGGER = logging.getLogger(__name__)
+
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Nobø Ecohub."""
@@ -35,6 +39,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._discovered_hubs = None
         self._hub = None
+
+    async def async_step_dhcp(self, discovery_info: DhcpServiceInfo) -> FlowResult:
+        """Handle dhcp discovery."""
+        _LOGGER.debug(discovery_info)
+        await self.async_set_unique_id(discovery_info.macaddress)
+
+        self.context[CONF_IP_ADDRESS] = discovery_info.ip
+        self._abort_if_unique_id_configured({CONF_IP_ADDRESS: discovery_info.ip})
+        self._async_abort_entries_match({CONF_IP_ADDRESS: discovery_info.ip})
+
+        return await self.async_step_user()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
