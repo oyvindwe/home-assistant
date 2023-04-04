@@ -58,7 +58,7 @@ class NoboTemperatureSensor(SensorEntity):
         self._nobo = hub
         component = hub.components[self._id]
         self._attr_unique_id = component[ATTR_SERIAL]
-        self._attr_name = "Temperature"
+        self._attr_translation_key = "temperature"
         self._attr_has_entity_name = True
         self._attr_device_info: DeviceInfo = {
             ATTR_IDENTIFIERS: {(DOMAIN, component[ATTR_SERIAL])},
