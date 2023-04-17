@@ -270,20 +270,20 @@ async def test_options_flow(hass: HomeAssistant) -> None:
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={
-            CONF_OVERRIDE_TYPE: "Constant",
+            CONF_OVERRIDE_TYPE: "constant",
         },
     )
 
     assert result["type"] == "create_entry"
-    assert config_entry.options == {CONF_OVERRIDE_TYPE: "Constant"}
+    assert config_entry.options == {CONF_OVERRIDE_TYPE: "constant"}
 
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         user_input={
-            CONF_OVERRIDE_TYPE: "Now",
+            CONF_OVERRIDE_TYPE: "now",
         },
     )
 
     assert result["type"] == "create_entry"
-    assert config_entry.options == {CONF_OVERRIDE_TYPE: "Now"}
+    assert config_entry.options == {CONF_OVERRIDE_TYPE: "now"}

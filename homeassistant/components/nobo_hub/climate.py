@@ -36,6 +36,7 @@ from .const import (
     ATTR_TEMP_ECO_C,
     CONF_OVERRIDE_TYPE,
     DOMAIN,
+    OVERRIDE_TYPE_CONSTANT,
     OVERRIDE_TYPE_NOW,
 )
 
@@ -61,7 +62,8 @@ async def async_setup_entry(
 
     override_type = (
         nobo.API.OVERRIDE_TYPE_NOW
-        if config_entry.options.get(CONF_OVERRIDE_TYPE) == OVERRIDE_TYPE_NOW
+        if config_entry.options.get(CONF_OVERRIDE_TYPE, OVERRIDE_TYPE_CONSTANT).lower
+        == OVERRIDE_TYPE_NOW
         else nobo.API.OVERRIDE_TYPE_CONSTANT
     )
 

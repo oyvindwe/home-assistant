@@ -41,6 +41,14 @@
       }
     }
   },
+  "selector": {
+    "override_type": {
+      "options": {
+        "now": "Now",
+        "constant": "Constant"
+      }
+    }
+  },
   "entity": {
     "select": {
       "global_override": {

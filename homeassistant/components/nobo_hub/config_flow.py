@@ -12,6 +12,11 @@ from homeassistant.const import CONF_IP_ADDRESS
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .const import (
     CONF_AUTO_DISCOVERED,
@@ -31,16 +36,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the config flow."""
-        self._discovered_hubs = None
-        self._hub = None
+        self._discovered_hubs: dict[str, str]
+        self._hub: str
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle the initial step."""
-        if self._discovered_hubs is None:
+        if not hasattr(self, "_discovered_hubs"):
             self._discovered_hubs = dict(await nobo.async_discover_hubs())
 
         if not self._discovered_hubs:
@@ -195,15 +200,20 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             }
             return self.async_create_entry(title="", data=data)
 
+        # Lowercase for backwards compatibility
         override_type = self.config_entry.options.get(
             CONF_OVERRIDE_TYPE, OVERRIDE_TYPE_CONSTANT
-        )
+        ).lower()
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_OVERRIDE_TYPE, default=override_type): vol.In(
-                    [OVERRIDE_TYPE_CONSTANT, OVERRIDE_TYPE_NOW]
-                ),
+                vol.Required(CONF_OVERRIDE_TYPE, default=override_type): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[OVERRIDE_TYPE_CONSTANT, OVERRIDE_TYPE_NOW],
+                        translation_key=CONF_OVERRIDE_TYPE,
+                        mode=SelectSelectorMode.LIST,
+                    )
+                )
             }
         )
 
