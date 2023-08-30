@@ -11,6 +11,7 @@ from homeassistant.const import (
     Platform,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
@@ -33,7 +34,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     discover = entry.data[CONF_AUTO_DISCOVERED]
     ip_address = None if discover else entry.data[CONF_IP_ADDRESS]
     hub = nobo(serial=serial, ip=ip_address, discover=discover, synchronous=False)
-    await hub.connect()
+    try:
+        await hub.connect()
+    except Exception as exp:
+        raise PlatformNotReady from exp
 
     hass.data.setdefault(DOMAIN, {})
 

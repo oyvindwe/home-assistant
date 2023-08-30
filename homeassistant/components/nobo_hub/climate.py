@@ -19,6 +19,7 @@ from homeassistant.components.climate import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_NAME, PRECISION_TENTHS, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -126,12 +127,15 @@ class NoboZone(ClimateEntity):
             mode = nobo.API.OVERRIDE_MODE_COMFORT
         else:  # PRESET_NONE
             mode = nobo.API.OVERRIDE_MODE_NORMAL
-        await self._nobo.async_create_override(
-            mode,
-            self._override_type,
-            nobo.API.OVERRIDE_TARGET_ZONE,
-            self._id,
-        )
+        try:
+            await self._nobo.async_create_override(
+                mode,
+                self._override_type,
+                nobo.API.OVERRIDE_TARGET_ZONE,
+                self._id,
+            )
+        except Exception as exp:
+            raise HomeAssistantError from exp
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
@@ -140,9 +144,12 @@ class NoboZone(ClimateEntity):
             high = round(kwargs[ATTR_TARGET_TEMP_HIGH])
             low = min(low, high)
             high = max(low, high)
-            await self._nobo.async_update_zone(
-                self._id, temp_comfort_c=high, temp_eco_c=low
-            )
+            try:
+                await self._nobo.async_update_zone(
+                    self._id, temp_comfort_c=high, temp_eco_c=low
+                )
+            except Exception as exp:
+                raise HomeAssistantError from exp
 
     async def async_update(self) -> None:
         """Fetch new state data for this zone."""
