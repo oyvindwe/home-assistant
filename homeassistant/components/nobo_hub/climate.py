@@ -7,8 +7,6 @@ from typing import Any
 from pynobo import nobo
 
 from homeassistant.components.climate import (
-    ATTR_TARGET_TEMP_HIGH,
-    ATTR_TARGET_TEMP_LOW,
     PRESET_AWAY,
     PRESET_COMFORT,
     PRESET_ECO,
@@ -18,7 +16,12 @@ from homeassistant.components.climate import (
     HVACMode,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_NAME, PRECISION_TENTHS, UnitOfTemperature
+from homeassistant.const import (
+    ATTR_NAME,
+    ATTR_TEMPERATURE,
+    PRECISION_TENTHS,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -34,7 +37,7 @@ from .const import (
 )
 
 SUPPORT_FLAGS = (
-    ClimateEntityFeature.PRESET_MODE | ClimateEntityFeature.TARGET_TEMPERATURE_RANGE
+    ClimateEntityFeature.PRESET_MODE | ClimateEntityFeature.TARGET_TEMPERATURE
 )
 
 PRESET_MODES = [PRESET_NONE, PRESET_COMFORT, PRESET_ECO, PRESET_AWAY]
@@ -137,14 +140,16 @@ class NoboZone(ClimateEntity):
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
-        if ATTR_TARGET_TEMP_LOW in kwargs:
-            low = round(kwargs[ATTR_TARGET_TEMP_LOW])
-            high = round(kwargs[ATTR_TARGET_TEMP_HIGH])
-            low = min(low, high)
-            high = max(low, high)
-            await self._nobo.async_update_zone(
-                self._id, temp_comfort_c=high, temp_eco_c=low
-            )
+        if ATTR_TEMPERATURE in kwargs:
+            temp = round(kwargs[ATTR_TEMPERATURE])
+            if self._state == nobo.API.NAME_COMFORT:
+                await self._nobo.async_update_zone(
+                    self._id, temp_comfort_c=max(temp, self._temp_eco)
+                )
+            elif self._state == nobo.API.NAME_ECO:
+                await self._nobo.async_update_zone(
+                    self._id, temp_eco_c=min(temp, self._temp_comfort)
+                )
 
     async def async_update(self) -> None:
         """Fetch new state data for this zone."""
@@ -153,18 +158,24 @@ class NoboZone(ClimateEntity):
     @callback
     def _read_state(self) -> None:
         """Read the current state from the hub. These are only local calls."""
-        state = self._nobo.get_current_zone_mode(self._id, dt_util.now())
+        self._state = self._nobo.get_current_zone_mode(self._id, dt_util.now())
         self._attr_hvac_mode = HVACMode.AUTO
         self._attr_preset_mode = PRESET_NONE
+        self._temp_comfort = int(self._nobo.zones[self._id][ATTR_TEMP_COMFORT_C])
+        self._temp_eco = int(self._nobo.zones[self._id][ATTR_TEMP_ECO_C])
 
-        if state == nobo.API.NAME_OFF:
+        if self._state == nobo.API.NAME_OFF:
             self._attr_hvac_mode = HVACMode.OFF
-        elif state == nobo.API.NAME_AWAY:
+            self._attr_target_temperature = None
+        elif self._state == nobo.API.NAME_AWAY:
             self._attr_preset_mode = PRESET_AWAY
-        elif state == nobo.API.NAME_ECO:
+            self._attr_target_temperature = 7
+        elif self._state == nobo.API.NAME_ECO:
             self._attr_preset_mode = PRESET_ECO
-        elif state == nobo.API.NAME_COMFORT:
+            self._attr_target_temperature = self._temp_eco
+        elif self._state == nobo.API.NAME_COMFORT:
             self._attr_preset_mode = PRESET_COMFORT
+            self._attr_target_temperature = self._temp_comfort
 
         if self._nobo.get_zone_override_mode(self._id) != nobo.API.NAME_NORMAL:
             self._attr_hvac_mode = HVACMode.HEAT
@@ -172,12 +183,6 @@ class NoboZone(ClimateEntity):
         current_temperature = self._nobo.get_current_zone_temperature(self._id)
         self._attr_current_temperature = (
             None if current_temperature is None else float(current_temperature)
-        )
-        self._attr_target_temperature_high = int(
-            self._nobo.zones[self._id][ATTR_TEMP_COMFORT_C]
-        )
-        self._attr_target_temperature_low = int(
-            self._nobo.zones[self._id][ATTR_TEMP_ECO_C]
         )
 
     @callback
